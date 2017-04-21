@@ -54,7 +54,18 @@ $LUNIdentifiers | % {
 	}
 }
 
-if ($CheckUsage -eq $false -And $LUNs_To_Detach.Count -gt 0) {
+if ($CheckUsage -eq $true) {
+	if ($LUNs_To_Detach.Count -gt 0) {
+		Write-Host "The following LUNs will be detached from the cluster:";
+		$LUNs_To_Detach | % {
+			Write-Host $_;
+		}
+		
+	} else {
+		Write-Host "No LUNs are able to be detached from this cluster.";
+	}
+
+} elseif ($LUNs_To_Detach.Count -gt 0) {
 	#Write-Host "Detaching $($LUNs_To_Detach.Count) LUNs";
 	$Cluster | get-vmhost | sort Name | % {
 		write-host "Detaching LUNs from $($_.Name)" -Foreground Yellow
