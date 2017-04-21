@@ -1,6 +1,7 @@
 param(
 	[Parameter(Mandatory=$true,ValueFromPipeline)][VMware.VimAutomation.ViCore.Impl.V1.Inventory.ClusterImpl] $Cluster,
-	[Parameter(Mandatory=$true)][String[]] $LUNIdentifiers
+	[Parameter(Mandatory=$true)][String[]] $LUNIdentifiers,
+	[switch]$CheckUsage = $false
 )
 
 $vms = $Cluster | Get-VM;
@@ -53,7 +54,7 @@ $LUNIdentifiers | % {
 	}
 }
 
-if ($LUNs_To_Detach.Count -gt 0) {
+if ($CheckUsage = $false -And $LUNs_To_Detach.Count -gt 0) {
 	#Write-Host "Detaching $($LUNs_To_Detach.Count) LUNs";
 	$Cluster | get-vmhost | sort Name | % {
 		write-host "Detaching LUNs from $($_.Name)" -Foreground Yellow
