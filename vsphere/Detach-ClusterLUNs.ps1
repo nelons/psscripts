@@ -54,7 +54,7 @@ $LUNIdentifiers | % {
 	}
 }
 
-if ($CheckUsage = $false -And $LUNs_To_Detach.Count -gt 0) {
+if ($CheckUsage -eq $false -And $LUNs_To_Detach.Count -gt 0) {
 	#Write-Host "Detaching $($LUNs_To_Detach.Count) LUNs";
 	$Cluster | get-vmhost | sort Name | % {
 		write-host "Detaching LUNs from $($_.Name)" -Foreground Yellow
