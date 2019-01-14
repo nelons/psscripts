@@ -183,10 +183,25 @@ $DestinationPortgroups = @();
 $StandardSwitchNames = @();
 
 $vmhost_array | % {
-    $vss_array = $_ | Get-VirtualSwitch -Standard -Server $vc;
-    if ($vss_array -ne $null -And $vss_array.Count -gt 0) {
-        $vss_array | % {
-            $StandardSwitchNames += $_.Name;
+    $vmhost = $_;
+    $find_vswitches = $false;
+
+    # TODO: Test if the host is included
+    if ($IncludedHosts.Count -gt 0) {
+        $found = $IncludedHosts | ? { $_ -eq $vmhost.Name };
+        if ($found -ne $null) {
+            $find_vswitches = $true;
+        }
+    } else {
+        $find_vswitches = $true;
+    }
+
+    if ($find_vswitches -eq $true) {
+        $vss_array = $_ | Get-VirtualSwitch -Standard -Server $vc;
+        if ($vss_array -ne $null -And $vss_array.Count -gt 0) {
+            $vss_array | % {
+                $StandardSwitchNames += $_.Name;
+            }
         }
     }
 }
@@ -206,9 +221,32 @@ if ($vss_prompt -eq $true -Or ($SourceStandardSwitch -eq $null -Or $SourceStanda
     # TODO: Select a Name for the standard switch.
     Write-Host;
     Write-Host "The standard switches on the hosts in cluster $ClusterName`:" -ForegroundColor Yellow;
-    $StandardSwitchNames;
-    $SourceStandardSwitch = Read-Host "Please select a standard switch to migrate";
 
+    $x = 0;
+    $StandardSwitchNames | % {
+        Write-Host "$x`: $_";
+        $x++;
+    }
+
+    while ($true) {           
+        $vss_choice = $(Read-Host "Please select a standard switch to migrate");
+        if ($vss_choice.Length -gt 0) {
+            try {
+                $vss_choice = [int]$vss_choice;
+
+                if ($vss_choice -ge 0 -And $vss_choice -lt $StandardSwitchNames.Count) {
+                    $SourceStandardSwitch = $StandardSwitchNames[$vss_choice];
+                    Write-Host "The Virtual Standard Switch $SourceStandardSwitch was chosen." -ForegroundColor Green;
+                    break;
+
+                } else {
+                    Write-Host "Please enter a number between 0 and $($StandardSwitchNames.Count)" -ForegroundColor Red;
+                }
+            } catch {
+                Write-Host "The choice '$vss_choice' is not a valid number." -ForegroundColor Red;
+            }
+        }
+    }
 }
 
 if ($SourceStandardSwitch.Length -gt 0) {
@@ -233,7 +271,7 @@ if ($SourceStandardSwitch.Length -gt 0) {
         }
     }
 
-    $pgs = $pgs | select -Unique
+    $pgs = $pgs | sort -property Name | select Name, VLanId -Unique
 
     $pgs | % {
         Write-Host "$($_.Name) (VLAN $($_.VLanId))";
@@ -253,7 +291,7 @@ $vmhost_array | % {
         $found = $IncludedHosts | ? { $_ -eq $vmhost };
         if ($found -eq $null) {
             # No.
-            Write-Host "$vmhost is not specified for changes to made. Skipping.";
+            #Write-Host "$vmhost is not specified for changes to made. Skipping.";
             return;
 
         }
@@ -413,7 +451,7 @@ Write-Host "`nStarting to make changes." -ForegroundColor Green;
 
 # Ensure DRS is disabled.
 $drs_enabled = get-cluster $ClusterName -Server $vc | select -ExpandProperty DrsEnabled
-if ($drs_enabled -eq $true) {
+if ($drs_enabled -eq $true -And $WhatIf -eq $false) {
     Write-Host "DRS has been disabled for the Cluster $ClusterName" -ForegroundColor Yellow;
     Set-Cluster $ClusterName -DrsEnabled:$False -Server $vc | Out-Null;
 }
@@ -429,7 +467,7 @@ $vmhost_array | % {
         $found = $IncludedHosts | ? { $_ -eq $vmhost };
         if ($found -eq $null) {
             # No.
-            Write-Host "$vmhost is not in the IncludedHosts list. Ignoring.";
+            #Write-Host "$vmhost is not in the IncludedHosts list. Ignoring.";
             return;
 
         }
@@ -584,7 +622,7 @@ $vmhost_array | % {
 }
 
 # Re-enable DRS (if it was enabled before)
-if ($drs_enabled -eq $true) {
+if ($drs_enabled -eq $true  -And $WhatIf -eq $false) {
     Set-Cluster $ClusterName -Server $vc -DrsEnabled:$true;
     Write-Host "DRS has been re-enabled for the cluster $ClusterName" -ForegroundColor Green;
 }
