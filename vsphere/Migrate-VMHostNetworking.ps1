@@ -3,6 +3,7 @@ param([string] $vCenterServer,
       [string[]] $IncludedHosts,
       [string] $vDSName,
       [string] $SourceStandardSwitch,
+      [switch] $IgnoreISCSIWarnings,
       [switch] $WhatIf)
 
 Import-Module VMware.VimAutomation.Core;
@@ -43,10 +44,10 @@ if ($vCenterServer -ne $null -And $vCenterServer.Length -gt 0) {
 
 if ($vc -ne $null) {
     if ($using_existing -eq $true) {
-        Write-Host "Using existing connection to vCenter Server $($vc.Name)" -ForegroundColor Green;
+        Write-Host "Using existing connection to vCenter Server $($vc.Name)." -ForegroundColor Green;
 
     } else {
-        Write-Host "Connected to vCenter Server $($vc.Name)"  -ForegroundColor Green;
+        Write-Host "Connected to vCenter Server $($vc.Name)."  -ForegroundColor Green;
 
     }
 
@@ -74,13 +75,13 @@ if ($cluster_count -eq 0) {
         $chosenk = Read-Host "Please enter the number for the cluster you wish to work on";
         if ($chosenk -ge 0 -And $chosenk -lt $cl.Count) {
             $ClusterName = $cl[$chosenk];
-            Write-Host "You chose cluster $ClusterName`n" -ForegroundColor Green;
+            Write-Host "You chose cluster $ClusterName.`n" -ForegroundColor Green;
         }
     }
 
 } else {
     $ClusterName = $(Get-Cluster -Server $vc).Name;
-    Write-Host "There is only one cluster - using $ClusterName";
+    Write-Host "There is only one cluster - using $ClusterName.";
 
 }
 
@@ -92,7 +93,7 @@ if ((Get-Cluster $ClusterName -Server $vc -ErrorAction SilentlyContinue) -eq $nu
 
 $vmhost_array = Get-VMHost -Location $ClusterName -Server $vc | Sort Name;
 if ($vmhost_array -eq $null -Or $vmhost_array.Count -eq 0) {
-    Write-Host "There was a problem getting the list of hosts in the cluster $ClusterName" -ForegroundColor Red;
+    Write-Host "There was a problem getting the list of hosts in the cluster $ClusterName." -ForegroundColor Red;
     exit;
 }
 
@@ -113,14 +114,14 @@ elseif ($vds_count -gt 1) {
     $vds = Get-VDSwitch $vDSName -Server $vc -ErrorAction SilentlyContinue;
     # Get the VDS
     if ($vds -eq $null) {
-        Write-Host "A virtual distributed switch with the name $vdsName could not be found.";
+        Write-Host "A virtual distributed switch with the name $vdsName could not be found..";
         exit;
     }
 }
 else {
     $vds = $(Get-VDSwitch -Server $vc)
     $vDSName = $vds.Name;
-    Write-Host "There is only one vDS on this vCenter. Using $vDSName" -ForegroundColor Green;
+    Write-Host "There is only one vDS on this vCenter. Using $vDSName." -ForegroundColor Green;
 
 }
 
@@ -218,34 +219,40 @@ if ($SourceStandardSwitch -ne $null -And $SourceStandardSwitch.Length -gt 0) {
 }
 
 if ($vss_prompt -eq $true -Or ($SourceStandardSwitch -eq $null -Or $SourceStandardSwitch.Length -eq 0)) {
-    # TODO: Select a Name for the standard switch.
-    Write-Host;
-    Write-Host "The standard switches on the hosts in cluster $ClusterName`:" -ForegroundColor Yellow;
+    if ($StandardSwitchNames.Count -eq 1) {
+        $SourceStandardSwitch = $StandardSwitchNames;
+        Write-Host "There is only one Virtual Standard Switch on the host - Using $SourceStandardSwitch." -ForegroundColor Green;       
 
-    $x = 0;
-    $StandardSwitchNames | % {
-        Write-Host "$x`: $_";
-        $x++;
-    }
+    } else {
+        # TODO: Select a Name for the standard switch.
+        Write-Host;
+        Write-Host "The standard switches on the hosts in cluster $ClusterName`:" -ForegroundColor Yellow;
 
-    while ($true) {           
-        $vss_choice = $(Read-Host "Please select a standard switch to migrate");
-        if ($vss_choice.Length -gt 0) {
-            try {
-                $vss_choice = [int]$vss_choice;
-
-                if ($vss_choice -ge 0 -And $vss_choice -lt $StandardSwitchNames.Count) {
-                    $SourceStandardSwitch = $StandardSwitchNames[$vss_choice];
-                    Write-Host "The Virtual Standard Switch $SourceStandardSwitch was chosen." -ForegroundColor Green;
-                    break;
-
-                } else {
-                    Write-Host "Please enter a number between 0 and $($StandardSwitchNames.Count)" -ForegroundColor Red;
-                }
-            } catch {
-                Write-Host "The choice '$vss_choice' is not a valid number." -ForegroundColor Red;
-            }
+        $x = 0;
+        $StandardSwitchNames | % {
+            Write-Host "$x`: $_";
+            $x++;
         }
+
+        while ($true) {           
+            $vss_choice = $(Read-Host "Please select a standard switch to migrate");
+            if ($vss_choice.Length -gt 0) {
+                try {
+                    $vss_choice = [int]$vss_choice;
+
+                    if ($vss_choice -ge 0 -And $vss_choice -lt $StandardSwitchNames.Count) {
+                        $SourceStandardSwitch = $StandardSwitchNames[$vss_choice];
+                        Write-Host "The Virtual Standard Switch $SourceStandardSwitch was chosen." -ForegroundColor Green;
+                        break;
+
+                    } else {
+                        Write-Host "Please enter a number between 0 and $($StandardSwitchNames.Count)" -ForegroundColor Red;
+                    }
+                } catch {
+                    Write-Host "The choice '$vss_choice' is not a valid number." -ForegroundColor Red;
+                }
+            }
+        }    
     }
 }
 
@@ -386,8 +393,20 @@ $vmhost_array | % {
             }
         }
 
+
+
         # Get the Portgroups on the switches.
         $pgs = $vss | Get-VirtualPortGroup -Server $vc;
+        if ($pgs.Count -gt 0) {
+            Write-Host "`nThe Distributed PortGroups are" -ForegroundColor Yellow;                    
+            $choices = $vds | Get-VDPortgroup -Server $vc | sort Name | Select -ExpandProperty Name;
+            $i = 0;
+            $choices | % {
+                Write-Host "$i`: $_";
+                $i++;
+            }            
+        }
+
         $pgs | % {
             $vpg = $_;
             $dest = $null;
@@ -398,14 +417,6 @@ $vmhost_array | % {
             if ($dest -eq $null) {
                 $pg_added = $false;
                 while ($pg_added -eq $false) {                    
-                    Write-Host "The Distributed PortGroups are" -ForegroundColor Yellow;                    
-                    $choices = $vds | Get-VDPortgroup -Server $vc | sort Name | Select -ExpandProperty Name;
-                    $i = 0;
-                    $choices | % {
-                        Write-Host "$i`: $_";
-                        $i++;
-                    }
-
                     # Prompt for the name of a distributed port group to map this standard port group to.
                     $pg_choice = [int]$(Read-Host -Prompt "Enter the number for the destination port group for $($vpg.Name)");
                     #Write-Host "The choice was $pg_choice and should be between 0 and $($choices.Count)";
@@ -426,6 +437,12 @@ $vmhost_array | % {
         }
     }
 }
+
+# TODO: ask/work out which vmnic to migrate first.
+# Ideally check all portgroups and ensure there is redundancy.
+# If there isn't, there will be an outage.
+
+
 
 if ($WhatIf -ne $true) {
     $title = "Analysis is complete. Ready to migrate the standard switch networking to the VDS."
@@ -451,9 +468,10 @@ Write-Host "`nStarting to make changes." -ForegroundColor Green;
 
 # Ensure DRS is disabled.
 $drs_enabled = get-cluster $ClusterName -Server $vc | select -ExpandProperty DrsEnabled
-if ($drs_enabled -eq $true -And $WhatIf -eq $false) {
+$previous_drs = get-cluster $ClusterName | select -ExpandProperty DrsAutomationLevel;
+if ($drs_enabled -eq $true -And $previous_drs -ne "Manual" -And $WhatIf -eq $false) {
     Write-Host "DRS has been disabled for the Cluster $ClusterName" -ForegroundColor Yellow;
-    Set-Cluster $ClusterName -DrsEnabled:$False -Server $vc | Out-Null;
+    Set-Cluster $ClusterName -DrsAutomationLevel Manual -Confirm:$False | Out-Null;
 }
 
 # Now we have all the mappings, it's time to do something about it.
@@ -461,15 +479,11 @@ if ($drs_enabled -eq $true -And $WhatIf -eq $false) {
 $vmhost_array | % {
     $vmhost = $_;
 
-    # TODO: See if this host is one we want to examine.
     # See if this host is one we want to examine.
     if ($IncludedHosts.Count -gt 0) {
         $found = $IncludedHosts | ? { $_ -eq $vmhost };
         if ($found -eq $null) {
-            # No.
-            #Write-Host "$vmhost is not in the IncludedHosts list. Ignoring.";
             return;
-
         }
     }
 
@@ -481,6 +495,68 @@ $vmhost_array | % {
     if ($vss -ne $null) {
         # Move the first NIC to the vDS ?
         $vss_uplinks = $vmhost | Get-VMHostNetworkAdapter -Server $vc -Physical -VirtualSwitch $vss;
+
+        # Is there any ISCSI on this vSwitch ?
+        $iscsi_hba = $vmhost | Get-VMHostHBA -Type iSCSI;
+        Write-Host "Total number of iSCSI adapters on the host: $($iscsi_hba.Count)" -ForegroundColor Red;
+
+        $cli = Get-ESXCli -VMHost $vmhost -V2;
+        $iscsi_bindings = @();
+        if ($iscsi_hba.Count -gt 0) {
+            # Yes.
+            $iscsi_hba | % {
+                # Remove the binding ?
+                $hba = $_;
+
+                # Not sure - might need @{"adapter" = $hba} as the parameter.
+                $bindings = $cli.iscsi.networkportal.list.invoke();
+                $bindings | ? { $_.Vswitch -eq $vss.Name} | % {
+                    Write-Host "Found an iSCSI binding on the virtual switch." -ForegroundColor Red;
+                    $binding = $_;                    
+                    # There is a iSCSI 
+                    $entry = "" | select Adapter, vmk, Status;
+                    $entry.Adapter = $binding.Adapter;
+                    $entry.vmk = $binding.vmknic;
+                    $entry.Status = "bound";
+                    $iscsi_bindings += $entry;
+                }
+            }
+
+            $migrate_binding = $false;
+            if ($iscsi_bindings.Count -ge 2) {
+                # Disconnect one of them.
+                Write-Host "Disconnecting binding for vmknic $($iscsi_bindings[0].vmk)" -ForegroundColor Red;
+                $migrate_binding = $true;
+
+            } elseif ($iscsi_bindings.Count -eq 1) {
+                Write-Host "There is only one iSCSI binding. Moving the adapter will cause an outage for any VMs using attached storage." -ForegroundColor Red;
+
+                if ($IgnoreISCSIWarnings -eq $false) { 
+                    Write-Host "Set `$IgnoreISCSIWarnings to true to ignore this warning and migrate anyway." -ForegroundColor Red;
+                    Write-Host "Aborting migration on this host.";
+                    return;
+                } else {
+                    $migrate_binding = $true;
+                }
+            }
+
+            if ($WhatIf -eq $false -And $migrate_binding -eq $true) {
+                $binding = $iscsi_bindings[0];                
+                $unbind_result = $cli.iscsi.networkportal.remove.invoke(@{"adapter"="$($binding.Adapter)";"force"="true";"nic"="$($binding.vmk)"});
+                if ($unbind_result -eq $false) {
+                    Write-Host "Failed to unbind the iSCSI vmk from the adapter." -ForegroundColor Red;
+
+                    if ($IgnoreISCSIWarnings -eq $false) {
+                        Write-Host "Aborting migration on this host.";
+                        return;
+                    }
+                } else {
+                    Write-Host "Unbound $($binding.vmk) from iSCSI adapter '$($binding.Adapter)'";
+                    $iscsi_bindings[0].Status = "unbound";                    
+
+                }                
+            }
+        }
 
         # TODO: Should we only move a NIC if there is no current portgroup connectivity ?
 
@@ -508,6 +584,8 @@ $vmhost_array | % {
         }
 
         if ($vmnic_map -ne $null) {
+            # TODO: don't do this if only one uplink ?
+
             $not_complete = $false;
             Write-Host "Migrating NIC $migrate_nic...";
             if ($WhatIf -eq $false) {
@@ -515,39 +593,8 @@ $vmhost_array | % {
 
             }
 
-            # Move VMKernel Interface.
-            $vmks = $vmhost | get-vmhostnetworkadapter -VMKernel -Server $vc | ? { $($vss | Get-VirtualPortGroup -Server $vc | select -expandproperty Name) -contains $_.PortGroupName }
-            if ($vmks.Count -gt 0) {
-                Write-Host "Migrating VMKernel Interfaces:";
-
-            } else {
-                Write-Host "There are no VMKernel interfaces to migrate.";
-
-            }
-
-            $vmks | % {
-                $vmk_name = $_.PortGroupName;
-
-                # Find the mapping.
-                $vmk_map = $DestinationPortgroups | ? { $_[0] -eq $vmk_name }; #$vmk_mapping | ? { $_.VMKName -eq $vmk_name };
-                if ($vmk_map -ne $null) {
-                    # Move the Adapter
-                    Write-Host "Migrating VMK $($_.Name) ..."
-                    if ($WhatIf -eq $False) {
-                        Set-VMHostNetworkAdapter -PortGroup $($vmk_map[1]) -VirtualNic $_ -Confirm:$False -ErrorAction SilentlyContinue -ErrorVariable a | out-null;
-                    
-                        if ($a -ne $null) {
-                            Write-Host "There was an error moving the vmk adapter." -ForegroundColor Red;
-                            $not_complete = $true;
-
-                        } else {
-                            # Remove the Portgroup.
-                            $vpg = $vmhost | Get-VirtualPortGroup -Name $vmk_name -VirtualSwitch $vss;
-                            Remove-VirtualPortGroup $vpg -Confirm:$False;
-
-                        }
-                    }
-                }
+            if ($WhatIf -eq $false) {
+                Sleep(5);
             }
 
             # Move VMs
@@ -571,16 +618,21 @@ $vmhost_array | % {
                         }
                     }
                 }
-
+            
                 if ($WhatIf -eq $false) {
-                    Sleep(5);
+                    Start-Sleep -Seconds 5
                 }
 
                 if ($WhatIf -eq $False) {
                     $vm_count = $vmhost | Get-VM | ? { $_ | Get-NetworkAdapter | ? { $_.NetworkName -eq $vpg.Name }};
                     if ($vm_count -eq $null -Or $vm_count -eq 0) {
-                        # Remove the Portgroup.
-                        $vpg | Remove-VirtualPortgroup -Confirm:$False;
+                        # TODO: ensure there are no VMKs on this portgroup
+                        $vmks_on_vpg = $vmhost | Get-VMHostNetwork | Select-Object Hostname, VMkernelGateway -ExpandProperty VirtualNic | where {$_.PortGroupName -match $vpg.Name };
+
+                        if ($null -eq $vmks_on_vpg -Or $vmks_on_vpg.Count -eq 0) {
+                            # Remove the Portgroup.
+                            $vpg | Remove-VirtualPortgroup -Confirm:$False;
+                        }
 
                     } else {
                         Write-Host "There are still VMs left on $($vpg.Name)" -ForegroundColor Red;
@@ -588,7 +640,72 @@ $vmhost_array | % {
 
                     }
                 }
+            }  
+
+            # Move VMKernel Interface.
+            $vmks = $vmhost | get-vmhostnetworkadapter -VMKernel -Server $vc | ? { $($vss | Get-VirtualPortGroup -Server $vc | select -expandproperty Name) -contains $_.PortGroupName }
+            if ($vmks.Count -gt 0) {
+                Write-Host "Migrating VMKernel Interfaces:";
+
+            } else {
+                Write-Host "There are no VMKernel interfaces to migrate.";
+
+            }           
+
+            $vmks | % {
+                $vmk_name = $_.PortGroupName;
+
+                # TODO: ignore if this is an ISCSI vmk.
+                $vmk_iscsi = $iscsi_bindings | ? { $_.vmk -eq $vmk_name -And $_.Status -eq "bound" };
+                if ($vmk_iscsi -ne $null) {
+                    Write-Host "$vmk_name is used for iSCSI bindings and is still bound." -ForegroundColor Red;
+
+                } else {                
+                    # Find the mapping.
+                    $vmk_map = $DestinationPortgroups | ? { $_[0] -eq $vmk_name }; #$vmk_mapping | ? { $_.VMKName -eq $vmk_name };
+                    if ($vmk_map -ne $null) {                        
+                        # Move the Adapter
+                        Write-Host "Migrating VMK $($_.Name) ... to portgroup $($vmk_map[1])"
+                        if ($WhatIf -eq $False) {
+                            Set-VMHostNetworkAdapter -PortGroup $($vmk_map[1]) -VirtualNic $_ -Confirm:$False -ErrorAction SilentlyContinue -ErrorVariable a | out-null;
+                        
+                            if ($a -ne $null) {
+                                Write-Host "There was an error moving the vmk adapter." -ForegroundColor Red;
+                                Write-Host $a;
+                                $not_complete = $true;
+
+                            } else {
+                                # TODO: check if the port group is still in use
+
+
+                                # Remove the Portgroup.
+                                $vpg = $vmhost | Get-VirtualPortGroup -Name $vmk_name -VirtualSwitch $vss;
+                                Remove-VirtualPortGroup $vpg -Confirm:$False;
+
+                            }
+                        }
+                    }
+                }
             }
+
+            # TODO: rebind the iSCSI vmk
+            $unbound_iscsi = $iscsi_bindings | ? { $_.Status -eq "unbound" };
+            $unbound_iscsi | % {
+                # Bind it.
+                $binding = $_;
+                Write-Host "Rebinding vmk $($binding.vmk) to iSCSI adapter '$($binding.Adapter)'";
+
+                $bind_result = $cli.iscsi.networkportal.add.invoke(@{"adapter"="$($binding.Adapter)";"force"="false";"nic"="$($binding.vmk)"});
+                if ($bind_result -eq $true) {
+                    $_.Status = "migrated";
+
+                } else {
+                    Write-Host "There was a proble rebinding the iSCSI adapter.";
+
+                }
+
+                # TODO: mark this as only being able to use one adapter ?
+            }      
 
             if ($not_complete -eq $false) {
                 # Move other VMNICS
@@ -610,6 +727,9 @@ $vmhost_array | % {
                         }
                     }
                 }
+
+                # TODO: Move the other iSCSI VMKs
+
             
                 # Delete the vSwitch
                 if ($WhatIf -eq $False) {
@@ -617,13 +737,19 @@ $vmhost_array | % {
                     Write-Host "The Standard Switch $SourceStandardSwitch has been deleted on host $($vmhost.Name)." -ForegroundColor Green;
                 }
             }
+            
+            if ($iscsi_bindings.Count -gt 0 -And $WhatIf -eq $false) {
+                # Rescan the adapter.
+                Write-Host "Rescanning the Software iSCSI adapter.";
+                $rescan_result = $cli.storage.core.adapter.rescan.invoke(@{"adapter"="$($iscsi_bindings[0].Adapter)"});
+            }
         }
     }
 }
 
 # Re-enable DRS (if it was enabled before)
-if ($drs_enabled -eq $true  -And $WhatIf -eq $false) {
-    Set-Cluster $ClusterName -Server $vc -DrsEnabled:$true;
+if ($drs_enabled -eq $true -And $previous_drs -ne "Manual" -And $WhatIf -eq $false) {
+    Set-Cluster $ClusterName -DrsAutomationLevel $previous_drs -Confirm:$False;
     Write-Host "DRS has been re-enabled for the cluster $ClusterName" -ForegroundColor Green;
 }
 
