@@ -1,6 +1,7 @@
 # Configuration variables.
 # The FQDN (or IP) of your vCenter Server.
 $vCenterServer = "vcenter.dnsname";
+$ClusterName = "cluster";
 
 # An array of datastore names that you want to convert.
 $datastores = @("Datastore Name");
@@ -9,7 +10,7 @@ $datastores = @("Datastore Name");
 $iops_switch = 1;
 
 Connect-VIServer $vCenterServer | out-null;
-$hosts = Get-VMHost -Location RCI.UK-MX1 | Where-object {($_.ConnectionState -like "Connected")} | Sort-Object Name
+$hosts = Get-VMHost -Location $ClusterName | Where-object {($_.ConnectionState -like "Connected")} | Sort-Object Name
 
 # This will get the datastores from the array at the top of the file. 
 $ds_id = $datastores | ForEach-Object { Get-Datastore -Name $_ } | ForEach-Object { return $_.ExtensionData.Info.Vmfs.Extent.DiskName; }
