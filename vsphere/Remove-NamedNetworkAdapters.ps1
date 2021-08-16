@@ -1,5 +1,7 @@
 param([string] $VMName,
-      [Parameter(Mandatory=$true)][string] $NetworkName)
+      [string] $VMLocation,
+      [Parameter(Mandatory=$true)][string] $NetworkName,
+      [switch] $WhatIf)
 
 <#
     param: vm name. if blank, get them all.
@@ -18,9 +20,22 @@ if ($global:DefaultVIServers.Count -eq 0) {
 # Get the VMs
 $vms = @();
 if ($null -ne $VMName -And $VMName.Length -gt 0) {
-    $vms = Get-VM $VMName;
+    if ($null -ne $VMLocation -And $VMLocation.Length -gt 0) {
+        # Get VMs by Name and Location
+        $vms = Get-VM $VMName -Location $VMLocation | Sort-Object Name;
+    } else {
+        # Get VMs only by Name
+        $vms = Get-VM $VMName | Sort-Object Name;
+    }
+
+} elseif ($null -ne $VMLocation -And $VMLocation.Length -gt 0) {
+    # Gets VMs only by Location
+    $vms = Get-VM -Location $VMLocation | Sort-Object Name;
+
 } else {
+    # Get all VMs.
     $vms = Get-VM | Sort-Object Name;
+
 }
 
 # Loop through the VMs and disconnect any found adapters.
@@ -30,16 +45,22 @@ $vms | ForEach-Object {
     if ($null -ne $adapters) { 
         $adapters | ForEach-Object {
             $adapter_name = $_.Name;
+            $network_name = $_.NetworkName;
             $nic = $vm.ExtensionData.Config.Hardware.Device | Where-Object {$_.DeviceInfo.Label -eq $adapter_name };
             if ($null -ne $nic) {
-                $spec = New-Object VMware.Vim.VirtualMachineConfigSpec;
-                $dev = New-Object VMware.Vim.VirtualDeviceConfigSpec;
-                $dev.operation = "remove";
-                $dev.Device = $nic;
-                $spec.DeviceChange += $dev;
+                if ($WhatIf -eq $False) {
+                    $spec = New-Object VMware.Vim.VirtualMachineConfigSpec;
+                    $dev = New-Object VMware.Vim.VirtualDeviceConfigSpec;
+                    $dev.operation = "remove";
+                    $dev.Device = $nic;
+                    $spec.DeviceChange += $dev;
+                    $vm.ExtensionData.ReconfigVM($spec);
+                    Write-Host "$($vm.Name) - disconnected $adapter_name" -Foreground Green;
 
-                Write-Output "$($vm.Name) - disconnecting $adapter_name";
-                $vm.ExtensionData.ReconfigVM($spec);
+                } else {
+                    Write-Host "WHATIF - $($vm.Name) - want to disconnect $adapter_name on network $network_name";
+
+                }
             }
         }
     }
